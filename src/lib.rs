@@ -5,6 +5,26 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use rand::Rng;
 
+extern crate web_sys;
+use web_sys::console;
+
+pub struct Timer<'a> {
+    name: &'a str,
+}
+
+impl<'a> Timer<'a> {
+    pub fn new(name: &'a str) -> Timer<'a> {
+        console::time_with_label(name);
+        Timer { name }
+    }
+}
+
+impl<'a> Drop for Timer<'a> {
+    fn drop(&mut self) {
+        console::time_end_with_label(self.name);
+    }
+}
+
 #[wasm_bindgen]
 /// A struct representing the game of life.
 pub struct Universe {
@@ -93,7 +113,7 @@ impl Universe {
     ///     vec![0, 0, 0, 0, 1, 0, 0, 0, 0]
     /// );
     /// ```
-    pub fn set_cell(&mut self, row: u32, column: u32, state: bool) {
+    pub fn set_cell(&mut self, row: i32, column: i32, state: bool) {
         let index = self.get_index(row, column);
         self.cells.set(index, state);
     }
@@ -110,7 +130,7 @@ impl Universe {
     ///    vec![0, 0, 0, 0, 0, 0, 0, 0, 0]
     /// );
     /// ```
-    pub fn toggle_cell(&mut self, row: u32, column: u32) {
+    pub fn toggle_cell(&mut self, row: i32, column: i32) {
         let index = self.get_index(row, column);
         self.cells.toggle(index);
     }
@@ -163,11 +183,13 @@ impl Universe {
     }
 
     /// Get a cell vector index from row, column
-    pub fn get_index(&self, row: u32, column: u32) -> usize {
+    pub fn get_index(&self, row: i32, column: i32) -> usize {
         // Add a whole row/column and take the modulous to support wrapping
-        let row = (row + self.height) % self.height;
-        let column = (column + self.width) % self.width;
-        (row * self.width + column) as usize
+        let h = self.height as i32;
+        let w = self.width as i32;
+        let row = (row + h) % h;
+        let column = (column + w) % w;
+        (row * w + column) as usize
     }
 
     /// Return the number of living neighbours for the cell at a given row, column
@@ -185,7 +207,7 @@ impl Universe {
                         let row_index = row as i32 + dr;
                         let column_index = column as i32 + dc;
                         count += self.cells[
-                            self.get_index(row_index as u32, column_index as u32)
+                            self.get_index(row_index, column_index)
                             ] as u8;
                     })
             });
@@ -218,45 +240,16 @@ impl Universe {
     }
 
     /// Run an update step for the Universe
-    ///
-    /// # Example
-    /// ```
-    /// use wasm_game_of_life::{Universe};
-    /// let mut universe = Universe::new(Some(5), Some(5), None);
-    /// // Build a line
-    /// universe.set_cells(vec![
-    ///     0, 0, 0, 0, 0,
-    ///     0, 0, 0, 0, 0,
-    ///     0, 1, 1, 1, 0,
-    ///     0, 0, 0, 0, 0,
-    ///     0, 0, 0, 0, 0,
-    /// ]);
-    ///
-    /// println!("{}", universe);
-    /// // Run a tick
-    /// universe.tick();
-    /// println!("{}", universe);
-    ///
-    /// // Check the state of the universe
-    /// assert_eq!(
-    ///    universe.get_cells(),
-    ///     vec![
-    ///         0, 0, 0, 0, 0,
-    ///         0, 0, 1, 0, 0,
-    ///         0, 0, 1, 0, 0,
-    ///         0, 0, 1, 0, 0,
-    ///         0, 0, 0, 0, 0,
-    ///     ]
-    /// );
     pub fn tick(&mut self) {
+        let _timer = Timer::new("Universe::tick");  // Measure performance. RAII
         let mut next= self.cells.clone();
-        (1..self.height).into_iter()
+        (0..self.height).into_iter()
             .for_each(
                 |r| {
-                    (1..self.width).into_iter()
+                    (0..self.width).into_iter()
                         .for_each(
                             |c| {
-                                let index = self.get_index(r, c);
+                                let index = self.get_index(r as i32, c as i32);
                                 let neighbours_alive = self.count_living_neighbours(r, c);
                                 next.set(
                                     index,
@@ -268,6 +261,128 @@ impl Universe {
             );
         self.cells = next;
         self.generation += 1;
+    }
+
+    /// Add a glider to the universe
+    /// # Example
+    /// ```
+    /// use wasm_game_of_life::{Universe};
+    /// let mut universe = Universe::new(Some(3), Some(3), Some(1.0));
+    /// universe.add_glider(1, 1, 0);
+    /// assert_eq!(universe.get_cells(), vec![
+    ///     0, 1, 0,
+    ///     0, 0, 1,
+    ///     1, 1, 1,
+    /// ]);
+    /// ```
+    /// ## Rotated Glider
+    /// ```
+    /// use wasm_game_of_life::{Universe};
+    /// let mut universe = Universe::new(Some(3), Some(3), Some(1.0));
+    /// universe.add_glider(1, 1, 1);
+    /// assert_eq!(universe.get_cells(), vec![
+    ///     1, 0, 0,
+    ///     1, 0, 1,
+    ///     1, 1, 0,
+    /// ]);
+    /// ```
+    pub fn add_glider(&mut self, row: i32, column: i32, orientation: u8) {
+        // Rotate the glider to the desired orientation.
+        // Orientation is a number from 0 to 3.
+        // 0=0°, 1=90°, 2=180°, 3=270°
+        let glider = match orientation {
+            0 => vec![
+                0, 1, 0,
+                0, 0, 1,
+                1, 1, 1
+            ],
+            1 => vec![
+                1, 0, 0,
+                1, 0, 1,
+                1, 1, 0
+            ],
+            2 => vec![
+                1, 1, 1,
+                1, 0, 0,
+                0, 1, 0
+            ],
+            3 => vec![
+                0, 1, 1,
+                1, 0, 1,
+                0, 0, 1
+            ],
+            _ => vec![
+                0, 1, 0,
+                0, 0, 1,
+                1, 1, 1
+            ]
+        };
+        let box_size = 3;
+        let nudge = 1;  // Centre the glider on the target cell
+        for r in 0..box_size {
+            for c in 0..box_size {
+                self.set_cell(
+                    row + r - nudge,
+                    column + c - nudge,
+                    glider[(r * box_size + c) as usize] > 0
+                );
+            }
+        }
+    }
+
+    /// Add a pulsar to the universe
+    /// # Example
+    /// ```
+    /// use wasm_game_of_life::{Universe};
+    /// let mut universe = Universe::new(Some(15), Some(15), Some(1.0));
+    /// universe.add_pulsar(7, 7);
+    /// assert_eq!(universe.get_cells(), vec![
+    ///     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ///     0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+    ///     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ///     0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+    ///     0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+    ///     0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+    ///     0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+    ///     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ///     0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+    ///     0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+    ///     0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+    ///     0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+    ///     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ///     0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+    ///     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    /// ]);
+    /// ```
+    pub fn add_pulsar(&mut self, row: i32, column: i32) {
+        let pulsar = vec![
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+            0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+            0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+            0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+            0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+            0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+            0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let box_size = 15;
+        let nudge = 7;  // Centre on target cell
+        for r in 0..box_size {
+            for c in 0..box_size {
+                self.set_cell(
+                    row + r - nudge,
+                    column + c - nudge,
+                    pulsar[(r * box_size + c) as usize] > 0
+                );
+            }
+        }
     }
 }
 
@@ -282,8 +397,8 @@ impl fmt::Display for Universe {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for r in 0..self.height {
             for c in 0..self.width {
-                let symbol = if self.cells[self.get_index(r, c)] { '◼' } else { '◻' };
-                write!(f, "{}", symbol)?;
+                let symbol = if self.cells[self.get_index(r as i32, c as i32)] { '◼' } else { '◻' };
+                write!(f, "{} ", symbol)?;
                 if c == self.width - 1 {
                     write!(f, "\n")?;
                 }

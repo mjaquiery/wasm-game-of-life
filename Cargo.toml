@@ -24,6 +24,12 @@ fixedbitset = "0.5.7"
 rand = "0.8.5"
 getrandom = { version = "0.2", features = ["js"] }  # for rand
 
+[dependencies.web-sys]
+version = "0.3.68"
+features = [
+  "console",
+]
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
 

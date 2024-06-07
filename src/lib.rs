@@ -114,7 +114,7 @@ impl Universe {
     /// );
     /// ```
     pub fn set_cell(&mut self, row: i32, column: i32, state: bool) {
-        let index = self.get_index(row, column);
+        let index = self.get_index_safe(row, column);
         self.cells.set(index, state);
     }
 
@@ -131,7 +131,7 @@ impl Universe {
     /// );
     /// ```
     pub fn toggle_cell(&mut self, row: i32, column: i32) {
-        let index = self.get_index(row, column);
+        let index = self.get_index_safe(row, column);
         self.cells.toggle(index);
     }
 
@@ -183,34 +183,64 @@ impl Universe {
     }
 
     /// Get a cell vector index from row, column
-    pub fn get_index(&self, row: i32, column: i32) -> usize {
-        // Add a whole row/column and take the modulous to support wrapping
-        let h = self.height as i32;
-        let w = self.width as i32;
-        let row = (row + h) % h;
-        let column = (column + w) % w;
-        (row * w + column) as usize
+    ///
+    /// Will not return sane values if
+    /// - the row or column is greater than height or width respectively.
+    pub fn get_index(&self, row: u32, column: u32) -> usize {
+        (row * self.width + column) as usize
+    }
+
+    /// Get a cell vector index from row, column
+    /// Allows for negative row and column values
+    ///
+    /// Slower than get_index() because of bounds checking
+    /// but safer to use with user input.
+    pub fn get_index_safe(&self, row: i32, column: i32) -> usize {
+        let row = (row + self.height as i32) % self.height as i32;
+        let column = (column + self.width as i32) % self.width as i32;
+        self.get_index(row as u32, column as u32)
     }
 
     /// Return the number of living neighbours for the cell at a given row, column
     fn count_living_neighbours(&self, row: u32, column: u32) -> u8 {
         let mut count = 0;
-        let deltas: [i32;3] = [-1, 0, 1];
-        deltas.iter()
-            .for_each(|dr| {
-                deltas.iter()
-                    .for_each(|dc| {
-                        // The cell itself is not a neighbour
-                        if *dr == 0 && *dc == 0 {
-                            return;
-                        }
-                        let row_index = row as i32 + dr;
-                        let column_index = column as i32 + dc;
-                        count += self.cells[
-                            self.get_index(row_index, column_index)
-                            ] as u8;
-                    })
-            });
+
+        // Use a longwinded way to speed up access - avoid bounds checking
+        let north = if row == 0 {
+            self.height - 1
+        } else {
+            row - 1
+        };
+        let south = if row == self.height - 1 {
+            0
+        } else {
+            row + 1
+        };
+        let west = if column == 0 {
+            self.width - 1
+        } else {
+            column - 1
+        };
+        let east = if column == self.width - 1 {
+            0
+        } else {
+            column + 1
+        };
+
+        let indices = [
+            self.get_index(north, west),
+            self.get_index(north, column),
+            self.get_index(north, east),
+            self.get_index(row, west),
+            self.get_index(row, east),
+            self.get_index(south, west),
+            self.get_index(south, column),
+            self.get_index(south, east),
+        ];
+        for i in indices.iter() {
+            count += self.cells[*i] as u8;
+        }
+
         count
     }
 
@@ -242,25 +272,34 @@ impl Universe {
     /// Run an update step for the Universe
     pub fn tick(&mut self) {
         let _timer = Timer::new("Universe::tick");  // Measure performance. RAII
-        let mut next= self.cells.clone();
-        (0..self.height).into_iter()
-            .for_each(
-                |r| {
-                    (0..self.width).into_iter()
-                        .for_each(
-                            |c| {
-                                let index = self.get_index(r as i32, c as i32);
-                                let neighbours_alive = self.count_living_neighbours(r, c);
-                                next.set(
-                                    index,
-                                    self.get_next_cell_state(neighbours_alive, self.cells[index])
-                                );
-                            }
-                        )
-                }
-            );
-        self.cells = next;
-        self.generation += 1;
+        let mut next= {
+            let _timer = Timer::new("allocate next cells");
+            self.cells.clone()
+        };
+        {
+            let _timer = Timer::new("calculate new generation");
+            (0..self.height).into_iter()
+                .for_each(
+                    |r| {
+                        (0..self.width).into_iter()
+                            .for_each(
+                                |c| {
+                                    let index = self.get_index(r, c);
+                                    let neighbours_alive = self.count_living_neighbours(r, c);
+                                    next.set(
+                                        index,
+                                        self.get_next_cell_state(neighbours_alive, self.cells[index]),
+                                    );
+                                }
+                            )
+                    }
+                )
+        };
+        {
+            let _timer = Timer::new("update cells");
+            self.cells = next;
+            self.generation += 1;
+        };
     }
 
     /// Add a glider to the universe
@@ -397,7 +436,7 @@ impl fmt::Display for Universe {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for r in 0..self.height {
             for c in 0..self.width {
-                let symbol = if self.cells[self.get_index(r as i32, c as i32)] { '◼' } else { '◻' };
+                let symbol = if self.cells[self.get_index(r, c)] { '◼' } else { '◻' };
                 write!(f, "{} ", symbol)?;
                 if c == self.width - 1 {
                     write!(f, "\n")?;

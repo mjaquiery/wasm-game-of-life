@@ -1,5 +1,5 @@
 [package]
-name = "wasm-game-of-life"
+name = "wasm-game-of-life-mjaquiery"
 version = "0.1.0"
 authors = ["Matt Jaquiery <matt.jaquiery@dtc.ox.ac.uk>"]
 edition = "2018"
@@ -36,3 +36,4 @@ wasm-bindgen-test = "0.3.34"
 [profile.release]
 # Tell `rustc` to optimize for small code size.
 opt-level = "s"
+lto = true

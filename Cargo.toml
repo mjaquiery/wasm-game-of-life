@@ -22,7 +22,7 @@ js-sys = "0.3.69"
 
 fixedbitset = "0.5.7"
 rand = "0.8.5"
-getrandom = { version = "0.2", features = ["js"] }  # for rand
+getrandom = { version = "0.3", features = ["js"] }  # for rand
 
 [dependencies.web-sys]
 version = "0.3.68"
